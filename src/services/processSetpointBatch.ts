@@ -17,8 +17,8 @@ export async function processSetpointBatch(
 ): Promise<void> {
   context.log(`Received a batch containing ${rawMessages.length} message(s).`);
 
-  // Sequential processing limits pressure on the unreliable vendor API and
-  // preserves the order of setpoints inside this batch.
+  // The queue uses one session per device. Awaiting each call preserves the
+  // session's received order and limits this invocation to one API call at a time.
   for (const [batchIndex, rawMessage] of rawMessages.entries()) {
     try {
       const decodedMessage = decodeServiceBusMessage(rawMessage);

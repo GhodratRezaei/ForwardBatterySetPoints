@@ -24,6 +24,10 @@ export async function forwardBatterySetpoints(
 app.serviceBusQueue(FUNCTION_NAME, {
   queueName: SERVICE_BUS_QUEUE_NAME,
   connection: SERVICE_BUS_CONNECTION_SETTING,
+  // Assumption: the queue is session-enabled and the sender uses device_id
+  // as the Service Bus SessionId, preserving order for each battery.
+  isSessionsEnabled: true,
   cardinality: "many",
+  autoCompleteMessages: true,
   handler: forwardBatterySetpoints,
 });

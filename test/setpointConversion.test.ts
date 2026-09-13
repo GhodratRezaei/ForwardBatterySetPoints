@@ -49,6 +49,7 @@ describe("setpoint conversion", () => {
   // TODO: Add a test proving that HTTP 500 is retried no more than the configured maximum attempt count.
   // TODO: Add a test proving that permanent HTTP 400, 401, and 404 responses are not retried.
   // TODO: Add a test proving that only HTTP 204 is accepted as a successful vendor response.
-  // TODO: Add a test proving that setpoints in one batch are published sequentially in their received order.
+  // TODO: Add a test proving that messages from one device session are published sequentially in their received order.
+  // TODO: Add an integration test proving that the deployed trigger accepts messages from the session-enabled queue.
   // TODO: Add a test proving that a failed accepted message rejects the invocation so Service Bus can retry the batch.
 });
