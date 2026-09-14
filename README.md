@@ -19,7 +19,7 @@ This is an assignment implementation, not a production-ready battery controller.
 - [Local development](#local-development)
 - [Testing](#testing)
 - [Deployment considerations](#deployment-considerations)
-- [Appendix](#appendix)
+- [Optional appendix: Deployment and CI/CD](#appendix)
 
 ## Architecture and processing
 
@@ -358,7 +358,7 @@ Before running against real resources:
 
 The [Service Bus binding configuration reference](https://learn.microsoft.com/en-us/azure/azure-functions/functions-bindings-service-bus#hostjson-settings) describes the host settings to review during deployment.
 
-## Appendix
+## Appendix (Optional: Deployment and CI/CD)
 
 Detailed deployment and CI/CD material is kept separately from the main assignment documentation:
 

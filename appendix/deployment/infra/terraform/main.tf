@@ -124,8 +124,8 @@ resource "azurerm_function_app_flex_consumption" "forwarder" {
   app_settings = {
     "AzureWebJobsStorage__accountName"              = azurerm_storage_account.function.name
     "AzureWebJobsStorage__credential"               = "managedidentity"
-    "ServiceBusConnection__fullyQualifiedNamespace" = "${azurerm_servicebus_namespace.commands.name}.servicebus.windows.net"
-    "ServiceBusConnection__credential"              = "managedidentity"
+    "CONNECTION-STRING-SBQ-BATBAT-SPT__fullyQualifiedNamespace" = "${azurerm_servicebus_namespace.commands.name}.servicebus.windows.net"
+    "CONNECTION-STRING-SBQ-BATBAT-SPT__credential"              = "managedidentity"
     "BATTERED_BATTERIES_BASE_URL"                   = var.vendor_base_url
     "BATTERED_BATTERIES_API_KEY"                    = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.vendor.vault_uri}secrets/vendor-api-key/)"
     "AzureWebJobs.forwardBatterySetpoints.Disabled" = tostring(!var.enable_trigger)

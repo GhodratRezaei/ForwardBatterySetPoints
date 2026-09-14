@@ -20,7 +20,7 @@ const registeredTriggers = [...mocks.register.mock.calls];
 describe("Azure trigger boundary", () => {
   it("registers the expected session-enabled batch trigger from the entry point", () => {
     expect(registeredTriggers).toEqual([["forwardBatterySetpoints", expect.objectContaining({
-      queueName: "sbq-batbat-spt", connection: "ServiceBusConnection",
+      queueName: "sbq-batbat-spt", connection: "CONNECTION-STRING-SBQ-BATBAT-SPT",
       isSessionsEnabled: true, cardinality: "many", autoCompleteMessages: true,
       handler: forwardBatterySetpoints,
     })]]);

@@ -1,9 +1,9 @@
 export const FUNCTION_NAME = "forwardBatterySetpoints";
 export const SERVICE_BUS_QUEUE_NAME = "sbq-batbat-spt";
 
-// Azure expects a setting name or identity-connection prefix, not a credential value.
+// Azure expects the application-setting name here, not the connection-string value.
 export const SERVICE_BUS_CONNECTION_SETTING =
-  "ServiceBusConnection";
+  "CONNECTION-STRING-SBQ-BATBAT-SPT";
 
 export const DEFAULT_API_BASE_URL = "https://BatB.azure-api.net";
 
