@@ -1,6 +1,12 @@
-import { isAcceptedDeviceId, prepareSetpoint, PreparedSetpoint, SetpointCommand } from "../../domain/battery/setpoint";
+import {
+  isAcceptedDeviceId,
+  prepareSetpoint,
+  PreparedSetpoint,
+  SetpointCommand,
+} from "../../domain/battery/setpoint";
 import { SetpointPublisher } from "../ports/setpointPublisher";
 
+// Coordinates one business operation without knowing the concrete publisher.
 export class ForwardBatterySetpoint {
   public constructor(private readonly publisher: SetpointPublisher) {}
 

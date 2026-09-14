@@ -2,15 +2,18 @@ data "azurerm_client_config" "current" {}
 
 locals {
   name = "${var.name_prefix}-${var.environment}"
+
   tags = merge(var.tags, { environment = var.environment, service = "battery-setpoint-forwarder", managed_by = "terraform" })
 }
 
+# Core resource group for one isolated environment.
 resource "azurerm_resource_group" "service" {
   name     = "rg-${local.name}"
   location = var.location
   tags     = local.tags
 }
 
+# Storage used by the Functions host and deployment package.
 resource "azurerm_storage_account" "function" {
   name                            = "${var.name_prefix}${var.environment}func"
   resource_group_name             = azurerm_resource_group.service.name
@@ -30,6 +33,7 @@ resource "azurerm_storage_container" "deployment" {
   container_access_type = "private"
 }
 
+# Session-enabled queue and namespace used by the Function trigger.
 resource "azurerm_servicebus_namespace" "commands" {
   name                = "sb-${local.name}"
   location            = var.location
@@ -50,6 +54,7 @@ resource "azurerm_servicebus_queue" "setpoints" {
   # Expiry is a business decision. Do not silently invent a command TTL here.
 }
 
+# Runtime secret is referenced from Key Vault; its value is supplied outside Terraform.
 resource "azurerm_key_vault" "vendor" {
   name                       = "kv-${local.name}"
   location                   = var.location
@@ -81,6 +86,7 @@ resource "azurerm_application_insights" "service" {
   tags                = local.tags
 }
 
+# Flex Consumption plan and Function App runtime.
 resource "azurerm_service_plan" "function" {
   name                = "plan-${local.name}"
   location            = var.location
@@ -108,6 +114,7 @@ resource "azurerm_function_app_flex_consumption" "forwarder" {
 
   identity { type = "SystemAssigned" }
 
+  # Always-ready workers are optional and normally enabled only for production.
   dynamic "always_ready" {
     for_each = var.always_ready_instances > 0 ? [1] : []
     content {
@@ -122,17 +129,18 @@ resource "azurerm_function_app_flex_consumption" "forwarder" {
   }
 
   app_settings = {
-    "AzureWebJobsStorage__accountName"              = azurerm_storage_account.function.name
-    "AzureWebJobsStorage__credential"               = "managedidentity"
+    "AzureWebJobsStorage__accountName"                         = azurerm_storage_account.function.name
+    "AzureWebJobsStorage__credential"                          = "managedidentity"
     "CONNECTION-STRING-SBQ-BATBAT-SPT__fullyQualifiedNamespace" = "${azurerm_servicebus_namespace.commands.name}.servicebus.windows.net"
     "CONNECTION-STRING-SBQ-BATBAT-SPT__credential"              = "managedidentity"
-    "BATTERED_BATTERIES_BASE_URL"                   = var.vendor_base_url
-    "BATTERED_BATTERIES_API_KEY"                    = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.vendor.vault_uri}secrets/vendor-api-key/)"
-    "AzureWebJobs.forwardBatterySetpoints.Disabled" = tostring(!var.enable_trigger)
+    "BATTERED_BATTERIES_BASE_URL"                               = var.vendor_base_url
+    "BATTERED_BATTERIES_API_KEY"                                = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.vendor.vault_uri}secrets/vendor-api-key/)"
+    "AzureWebJobs.forwardBatterySetpoints.Disabled"              = tostring(!var.enable_trigger)
   }
   # Terraform owns configuration. CI/CD owns the application package via One Deploy.
 }
 
+# Grant the Function only the permissions it needs at runtime.
 resource "azurerm_role_assignment" "receive_commands" {
   scope                = azurerm_servicebus_queue.setpoints.id
   role_definition_name = "Azure Service Bus Data Receiver"

@@ -9,6 +9,7 @@ parameters:
   type: string
 
 jobs:
+# Reusable Function deployment with artifact provenance checks.
 - deployment: Deploy
   environment: ${{ parameters.environment }}
   strategy:
@@ -38,6 +39,7 @@ jobs:
           env:
             EXPECTED_COMMIT: $(resources.pipeline.ci.sourceCommit)
           displayName: Verify the selected CI artifact
+        # Deploy the exact ZIP selected from the CI pipeline.
         - task: AzureFunctionApp@2
           inputs:
             azureSubscription: ${{ parameters.serviceConnection }}
@@ -45,6 +47,7 @@ jobs:
             isFlexConsumption: true
             appName: ${{ parameters.functionApp }}
             package: '$(Pipeline.Workspace)/ci/function/function.zip'
+        # Confirm registration only; this step does not send a live command.
         - task: AzureCLI@2
           displayName: Verify trigger registration (not a live command test)
           inputs:

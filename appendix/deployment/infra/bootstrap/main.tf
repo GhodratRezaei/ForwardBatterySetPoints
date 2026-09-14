@@ -1,4 +1,5 @@
 terraform {
+  # This module starts with local state because it creates the remote backend.
   required_version = "~> 1.13.0"
   required_providers {
     azurerm = {
@@ -13,6 +14,7 @@ provider "azurerm" {
   subscription_id = var.subscription_id
 }
 
+# Inputs required to create the shared Terraform state storage.
 variable "subscription_id" { type = string }
 variable "storage_account_name" { type = string }
 variable "state_operator_object_id" {
@@ -24,6 +26,7 @@ variable "location" {
   default = "westeurope"
 }
 
+# Resource group and storage account that hold Terraform state.
 resource "azurerm_resource_group" "state" {
   name     = "rg-company-terraform-state"
   location = var.location
@@ -46,6 +49,7 @@ resource "azurerm_storage_account" "state" {
   lifecycle { prevent_destroy = true }
 }
 
+# Private container used as the Terraform backend.
 resource "azurerm_storage_container" "state" {
   name                  = "tfstate"
   storage_account_id    = azurerm_storage_account.state.id

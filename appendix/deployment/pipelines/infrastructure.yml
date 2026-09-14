@@ -2,6 +2,7 @@
 trigger: none
 pr: none
 parameters:
+# Select the isolated environment to plan and apply.
 - name: environment
   type: string
   default: dev
@@ -14,6 +15,7 @@ pool:
   vmImage: ubuntu-latest
 
 stages:
+# Create a reviewed Terraform plan on the protected main branch.
 - stage: Plan
   condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
   jobs:
@@ -29,6 +31,7 @@ stages:
       artifact: infra-plan
 
 - stage: Apply
+  # Apply only the plan produced by the preceding stage.
   dependsOn: Plan
   jobs:
   - deployment: Apply

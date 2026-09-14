@@ -39,7 +39,7 @@ Dev and prod use separate names and Terraform state. Confirm quotas, networking,
 Terraform 1.13.x and Azure CLI are required. Validate without contacting Azure:
 
 ```bash
-terraform fmt -check -recursive infra
+terraform fmt -check -recursive appendix/deployment/infra
 terraform -chdir=appendix/deployment/infra/terraform init -backend=false -input=false -lockfile=readonly
 terraform -chdir=appendix/deployment/infra/terraform validate
 ```

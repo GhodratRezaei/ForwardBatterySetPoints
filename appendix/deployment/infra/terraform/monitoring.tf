@@ -1,3 +1,4 @@
+# Shared notification target for platform alerts.
 resource "azurerm_monitor_action_group" "operations" {
   name                = "alerts-${local.name}"
   resource_group_name = azurerm_resource_group.service.name
@@ -9,6 +10,7 @@ resource "azurerm_monitor_action_group" "operations" {
   tags = local.tags
 }
 
+# Alert when commands enter the Service Bus dead-letter queue.
 resource "azurerm_monitor_metric_alert" "dead_letters" {
   name                = "dlq-${local.name}"
   resource_group_name = azurerm_resource_group.service.name
@@ -33,6 +35,7 @@ resource "azurerm_monitor_metric_alert" "dead_letters" {
   tags = local.tags
 }
 
+# Alert when the Function reports failed requests.
 resource "azurerm_monitor_metric_alert" "failed_invocations" {
   name                = "failures-${local.name}"
   resource_group_name = azurerm_resource_group.service.name

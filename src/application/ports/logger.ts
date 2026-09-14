@@ -1,4 +1,4 @@
-/** Structural interface also satisfied by Azure's InvocationContext. */
+// Structural interface: Azure InvocationContext satisfies this without an adapter.
 export interface Logger {
   log(message: string): void;
   warn(message: string): void;

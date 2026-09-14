@@ -11,6 +11,7 @@ export async function forwardBatterySetpoints(
   messages: unknown[],
   context: InvocationContext,
 ): Promise<void> {
+  // The trigger adapter translates Azure invocations into application calls.
   const client = getSetpointPublisher();
 
   await processSetpointBatch(messages, client, context);

@@ -6,6 +6,7 @@ parameters:
   values: [plan, apply]
 
 steps:
+# Use the environment-specific federated service connection for Azure access.
 - task: AzureCLI@2
   displayName: Terraform ${{ parameters.command }} with workload identity federation
   inputs:
@@ -24,6 +25,7 @@ steps:
         -backend-config="container_name=tfstate" \
         -backend-config="key=battery-forwarder/$TF_VAR_environment.tfstate" \
         -backend-config="use_azuread_auth=true"
+      # Save plan output for review and reuse the binary plan during apply.
       if [ "$TF_COMMAND" = plan ]; then
         mkdir -p "$BUILD_ARTIFACTSTAGINGDIRECTORY/infra-plan"
         terraform -chdir=appendix/deployment/infra/terraform plan -input=false -lock-timeout=5m \

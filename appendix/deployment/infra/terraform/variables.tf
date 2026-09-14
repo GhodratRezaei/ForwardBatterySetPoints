@@ -1,3 +1,4 @@
+# Target subscription and resource naming.
 variable "subscription_id" {
   type        = string
   description = "Target Azure subscription UUID. Authentication comes from CLI or federation."
@@ -20,6 +21,7 @@ variable "environment" {
   }
 }
 
+# Azure location and vendor endpoint.
 variable "location" {
   type    = string
   default = "westeurope"
@@ -40,6 +42,7 @@ variable "enable_trigger" {
   description = "Enable only after the vendor key, endpoint and queue contract are verified."
 }
 
+# Runtime readiness and operations.
 variable "always_ready_instances" {
   type    = number
   default = 0

@@ -1,5 +1,6 @@
 import { InvalidSetpointError, SetpointCommand } from "../../domain/battery/setpoint";
 
+// Normalize the transport representation before applying message validation.
 export function decodeServiceBusMessage(rawMessage: unknown): unknown {
   if (typeof rawMessage === "string") {
     try {

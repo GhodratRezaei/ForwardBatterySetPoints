@@ -33,6 +33,7 @@ export class InvalidSetpointError extends Error {
   }
 }
 
+// This allowlist is the assignment's device boundary and remains domain-owned.
 export function isAcceptedDeviceId(deviceId: string): deviceId is AcceptedDeviceId {
   return (ACCEPTED_DEVICE_IDS as readonly string[]).includes(deviceId);
 }
@@ -46,6 +47,7 @@ export function prepareSetpoint(
     );
   }
 
+  // Validate after conversion so the API never receives an unsafe integer.
   if (
     !Number.isFinite(message.valueKilowatts) ||
     !Number.isSafeInteger(Math.round(message.valueKilowatts * -1000))

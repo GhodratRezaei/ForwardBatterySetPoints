@@ -12,6 +12,7 @@ export async function processSetpointBatch(
   client: SetpointPublisher,
   context: Logger,
 ): Promise<void> {
+  // The use case is created per invocation, while the publisher is shared by the worker.
   const forward = new ForwardBatterySetpoint(client);
   context.log(`Received a batch containing ${rawMessages.length} message(s).`);
 

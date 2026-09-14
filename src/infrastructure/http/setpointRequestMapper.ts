@@ -1,5 +1,6 @@
 import { InvalidSetpointError, PreparedSetpoint } from "../../domain/battery/setpoint";
 
+// The vendor requires startTime to be in the future when it receives the request.
 const API_START_DELAY_SECONDS = 2;
 
 export interface BatteredBatteriesRequest {

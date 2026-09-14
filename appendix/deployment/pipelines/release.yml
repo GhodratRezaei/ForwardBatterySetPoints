@@ -4,6 +4,7 @@ trigger: none
 pr: none
 resources:
   pipelines:
+  # Select a successful CI artifact; this release pipeline does not rebuild it.
   - pipeline: ci
     source: battery-forwarder-ci
     trigger: none
@@ -12,6 +13,7 @@ pool:
   vmImage: ubuntu-latest
 
 stages:
+# Deploy the selected artifact to development before production.
 - stage: Development
   condition: and(succeeded(), eq(variables['resources.pipeline.ci.sourceBranch'], 'refs/heads/main'))
   jobs:
@@ -23,6 +25,7 @@ stages:
       resourceGroup: $(DevResourceGroup)
 
 - stage: Production
+  # Production is reached only after development deployment succeeds.
   dependsOn: Development
   jobs:
   - template: templates/deploy.yml

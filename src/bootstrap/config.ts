@@ -12,6 +12,7 @@ export interface AppConfig {
   apiBaseUrl: string;
 }
 
+// Keep environment access at the composition boundary so core code stays portable.
 export function loadAppConfig(): AppConfig {
   return {
     apiKey: getRequiredEnvironmentVariable("BATTERED_BATTERIES_API_KEY"),

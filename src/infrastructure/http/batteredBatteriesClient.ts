@@ -98,6 +98,7 @@ export class BatteredBatteriesClient implements SetpointPublisher {
   }
 }
 
+
 export class UnexpectedApiResponseError extends Error {
   public constructor(public readonly status: number) {
     super(`The Battered Batteries API returned unexpected HTTP ${status}.`);

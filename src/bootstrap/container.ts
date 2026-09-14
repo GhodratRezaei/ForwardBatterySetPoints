@@ -4,11 +4,14 @@ import { loadAppConfig } from "./config";
 
 let publisher: SetpointPublisher | undefined;
 
-/** One client per worker process. Tests construct the use case with their own port. */
+/** One publisher per worker process; tests inject their own publisher port. */
 export function getSetpointPublisher(): SetpointPublisher {
   if (!publisher) {
     const config = loadAppConfig();
-    publisher = new BatteredBatteriesClient({ apiKey: config.apiKey, baseUrl: config.apiBaseUrl });
+    publisher = new BatteredBatteriesClient({
+      apiKey: config.apiKey,
+      baseUrl: config.apiBaseUrl,
+    });
   }
   return publisher;
 }

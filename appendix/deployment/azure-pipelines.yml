@@ -1,4 +1,5 @@
-# CI: safe tests require no Azure identity, live queue or vendor credentials.
+# Main CI pipeline: application verification is separate from Azure deployment.
+# These checks do not require Azure identity, a live queue, or vendor credentials.
 trigger:
   branches:
     include: [main]
@@ -10,44 +11,57 @@ pool:
   vmImage: ubuntu-latest
 
 jobs:
+# Build, test, and package the deployable Function artifact.
 - job: Application
   steps:
+  # Use the same Node.js major version as the target Function App.
   - task: UseNode@1
     inputs:
       version: '24.x'
+  # Install the exact dependency versions recorded in package-lock.json.
   - script: npm ci
     displayName: Install locked dependencies
+  # Compile application code and type-check the test project.
   - script: npm run build && npm run typecheck:tests
     displayName: Compile TypeScript
+  # Run unit, integration, and architecture tests and produce JUnit output.
   - script: npm run test:ci
     displayName: Unit, architecture and local HTTP integration tests
+  # Publish test results even when a preceding test step fails.
   - task: PublishTestResults@2
     condition: succeededOrFailed()
     inputs:
       testResultsFormat: JUnit
       testResultsFiles: artifacts/test-results.xml
       failTaskOnFailedTests: true
+  # Stage compiled code with production dependencies only.
   - script: npm run package
     displayName: Stage compiled code and production dependencies
+  # Archive the staged Function files as the release package.
   - task: ArchiveFiles@2
     inputs:
       rootFolderOrFile: artifacts/function
       includeRootFolder: false
       archiveType: zip
       archiveFile: '$(Build.ArtifactStagingDirectory)/function.zip'
+  # Record the package checksum and source commit for release verification.
   - bash: |
       set -euo pipefail
       cd "$(Build.ArtifactStagingDirectory)"
       sha256sum function.zip > function.zip.sha256
       printf '%s\n' "$BUILD_SOURCEVERSION" > commit.txt
     displayName: Record release identity and checksum
+  # Publish the ZIP, checksum, and commit metadata for the release pipeline.
   - publish: '$(Build.ArtifactStagingDirectory)'
     artifact: function
 
+# Validate Terraform syntax and provider schemas without accessing Azure.
 - job: TerraformValidation
   steps:
+  # Install the pinned Terraform version on the CI agent.
   - bash: bash appendix/deployment/scripts/install-terraform.sh
     displayName: Install pinned Terraform CLI
+  # Validate both the main environment and optional state bootstrap modules.
   - bash: |
       set -euo pipefail
       terraform fmt -check -recursive appendix/deployment/infra
