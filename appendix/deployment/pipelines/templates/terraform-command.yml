@@ -18,7 +18,7 @@ steps:
       export ARM_USE_OIDC=true ARM_USE_AZUREAD=true
       export ARM_CLIENT_ID="$servicePrincipalId" ARM_TENANT_ID="$tenantId" ARM_OIDC_TOKEN="$idToken"
       export ARM_SUBSCRIPTION_ID="$TF_VAR_subscription_id"
-      terraform -chdir=infra/terraform init -input=false -lockfile=readonly \
+      terraform -chdir=appendix/deployment/infra/terraform init -input=false -lockfile=readonly \
         -backend-config="resource_group_name=$TF_STATE_RESOURCE_GROUP" \
         -backend-config="storage_account_name=$TF_STATE_STORAGE_ACCOUNT" \
         -backend-config="container_name=tfstate" \
@@ -26,12 +26,12 @@ steps:
         -backend-config="use_azuread_auth=true"
       if [ "$TF_COMMAND" = plan ]; then
         mkdir -p "$BUILD_ARTIFACTSTAGINGDIRECTORY/infra-plan"
-        terraform -chdir=infra/terraform plan -input=false -lock-timeout=5m \
+        terraform -chdir=appendix/deployment/infra/terraform plan -input=false -lock-timeout=5m \
           -out="$BUILD_ARTIFACTSTAGINGDIRECTORY/infra-plan/service.tfplan"
-        terraform -chdir=infra/terraform show -no-color "$BUILD_ARTIFACTSTAGINGDIRECTORY/infra-plan/service.tfplan" \
+        terraform -chdir=appendix/deployment/infra/terraform show -no-color "$BUILD_ARTIFACTSTAGINGDIRECTORY/infra-plan/service.tfplan" \
           > "$BUILD_ARTIFACTSTAGINGDIRECTORY/infra-plan/review.txt"
       else
-        terraform -chdir=infra/terraform apply -input=false -lock-timeout=5m \
+        terraform -chdir=appendix/deployment/infra/terraform apply -input=false -lock-timeout=5m \
           "$PIPELINE_WORKSPACE/infra-plan/service.tfplan"
       fi
   env:

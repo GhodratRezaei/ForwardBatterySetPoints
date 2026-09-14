@@ -20,7 +20,7 @@
     "test:integration": "vitest run tests/integration",
     "test:architecture": "vitest run tests/architecture",
     "test:ci": "vitest run --reporter=default --reporter=junit --outputFile.junit=artifacts/test-results.xml",
-    "package": "node scripts/package.mjs",
+    "package": "node appendix/deployment/scripts/package.mjs",
     "dev:vendor": "node dev/mock-vendor.mjs",
     "typecheck:tests": "tsc -p tsconfig.test.json"
   },

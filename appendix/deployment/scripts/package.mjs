@@ -2,7 +2,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } fr
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
-const root = resolve(import.meta.dirname, "..");
+const root = resolve(import.meta.dirname, "../../..");
 const stage = resolve(root, "artifacts", "function");
 // Fixed, verified workspace-owned staging directory. Never clean an input path.
 if (stage !== resolve(root, "artifacts/function")) throw new Error("Invalid staging path");

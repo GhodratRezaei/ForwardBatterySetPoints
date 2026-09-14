@@ -17,7 +17,7 @@ async function runGate(result: string, sourceVersion = "expected-commit") {
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Missing test server address");
   try {
-    return await execute(process.execPath, [resolve("scripts/verify-ci-run.mjs")], {
+    return await execute(process.execPath, [resolve("appendix/deployment/scripts/verify-ci-run.mjs")], {
       env: {
         ...process.env,
         AZDO_TOKEN: "dummy-test-token", AZDO_COLLECTION: `http://127.0.0.1:${address.port}`,

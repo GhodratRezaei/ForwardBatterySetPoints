@@ -4,9 +4,7 @@ test/
 tests/
 dev/
 docs/
-infra/
-pipelines/
-scripts/
+appendix/
 artifacts/
 azure-pipelines.yml
 vitest.config.*

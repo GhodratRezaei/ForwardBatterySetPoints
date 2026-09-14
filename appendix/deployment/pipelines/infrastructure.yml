@@ -20,7 +20,7 @@ stages:
   - job: Plan
     steps:
     - checkout: self
-    - bash: bash scripts/install-terraform.sh
+    - bash: bash appendix/deployment/scripts/install-terraform.sh
     - template: templates/terraform-command.yml
       parameters:
         environment: ${{ parameters.environment }}
@@ -40,7 +40,7 @@ stages:
           - checkout: self
           - download: current
             artifact: infra-plan
-          - bash: bash scripts/install-terraform.sh
+          - bash: bash appendix/deployment/scripts/install-terraform.sh
           - template: templates/terraform-command.yml
             parameters:
               environment: ${{ parameters.environment }}

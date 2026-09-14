@@ -21,7 +21,7 @@ jobs:
         - task: UseNode@1
           inputs:
             version: '24.x'
-        - bash: node scripts/verify-ci-run.mjs
+        - bash: node appendix/deployment/scripts/verify-ci-run.mjs
           displayName: Require a successful protected-main CI run
           env:
             AZDO_TOKEN: $(System.AccessToken)
