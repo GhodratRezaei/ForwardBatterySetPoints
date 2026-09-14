@@ -2,6 +2,27 @@
 
 > Assignment project: a TypeScript Azure Functions v4 service that consumes battery setpoints from Azure Service Bus, validates and transforms them, and forwards them to the Battered Batteries API.
 
+## Table of contents
+
+- [Overview](#overview)
+- [Architecture](#architecture)
+- [End-to-end processing](#end-to-end-processing)
+- [Message lifecycle and failure behavior](#message-lifecycle-and-failure-behavior)
+- [Service Bus sessions and ordering](#service-bus-sessions-and-ordering)
+- [Input and API mapping](#input-and-api-mapping)
+- [Validation rules](#validation-rules)
+- [HTTP reliability policy](#http-reliability-policy)
+- [Project structure](#project-structure)
+- [Local development](#local-development)
+  - [Prerequisites](#prerequisites)
+  - [Install and verify](#install-and-verify)
+  - [Available commands](#available-commands)
+  - [Local configuration](#local-configuration)
+- [Testing](#testing)
+- [Deployment and operational considerations](#deployment-and-operational-considerations)
+- [Known trade-offs](#known-trade-offs)
+- [References](#references)
+
 ## Overview
 
 This project demonstrates a small, production-minded integration service built around an event-driven workflow:
