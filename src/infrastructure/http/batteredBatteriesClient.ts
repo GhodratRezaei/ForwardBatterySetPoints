@@ -1,8 +1,7 @@
 import axios, { AxiosInstance } from "axios";
-import {
-  createApiRequest,
-  PreparedSetpoint,
-} from "../domain/setpoint";
+import { PreparedSetpoint } from "../../domain/battery/setpoint";
+import { SetpointPublisher } from "../../application/ports/setpointPublisher";
+import { createApiRequest } from "./setpointRequestMapper";
 
 const DEFAULT_TIMEOUT_MS = 8_000;
 const DEFAULT_MAX_ATTEMPTS = 3;
@@ -24,7 +23,7 @@ export interface BatteredBatteriesClientOptions {
   clock?: Clock;
 }
 
-export class BatteredBatteriesClient {
+export class BatteredBatteriesClient implements SetpointPublisher {
   private readonly httpClient: AxiosInstance;
   private readonly maxAttempts: number;
   private readonly retryBaseDelayMs: number;

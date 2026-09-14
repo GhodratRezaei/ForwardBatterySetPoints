@@ -1,0 +1,48 @@
+parameters:
+- name: environment
+  type: string
+- name: command
+  type: string
+  values: [plan, apply]
+
+steps:
+- task: AzureCLI@2
+  displayName: Terraform ${{ parameters.command }} with workload identity federation
+  inputs:
+    azureSubscription: battery-${{ parameters.environment }}-infra
+    addSpnToEnvironment: true
+    scriptType: bash
+    scriptLocation: inlineScript
+    inlineScript: |
+      set -euo pipefail
+      export ARM_USE_OIDC=true ARM_USE_AZUREAD=true
+      export ARM_CLIENT_ID="$servicePrincipalId" ARM_TENANT_ID="$tenantId" ARM_OIDC_TOKEN="$idToken"
+      export ARM_SUBSCRIPTION_ID="$TF_VAR_subscription_id"
+      terraform -chdir=infra/terraform init -input=false -lockfile=readonly \
+        -backend-config="resource_group_name=$TF_STATE_RESOURCE_GROUP" \
+        -backend-config="storage_account_name=$TF_STATE_STORAGE_ACCOUNT" \
+        -backend-config="container_name=tfstate" \
+        -backend-config="key=battery-forwarder/$TF_VAR_environment.tfstate" \
+        -backend-config="use_azuread_auth=true"
+      if [ "$TF_COMMAND" = plan ]; then
+        mkdir -p "$BUILD_ARTIFACTSTAGINGDIRECTORY/infra-plan"
+        terraform -chdir=infra/terraform plan -input=false -lock-timeout=5m \
+          -out="$BUILD_ARTIFACTSTAGINGDIRECTORY/infra-plan/service.tfplan"
+        terraform -chdir=infra/terraform show -no-color "$BUILD_ARTIFACTSTAGINGDIRECTORY/infra-plan/service.tfplan" \
+          > "$BUILD_ARTIFACTSTAGINGDIRECTORY/infra-plan/review.txt"
+      else
+        terraform -chdir=infra/terraform apply -input=false -lock-timeout=5m \
+          "$PIPELINE_WORKSPACE/infra-plan/service.tfplan"
+      fi
+  env:
+    TF_COMMAND: ${{ parameters.command }}
+    TF_STATE_RESOURCE_GROUP: $(StateResourceGroup)
+    TF_STATE_STORAGE_ACCOUNT: $(StateStorageAccount)
+    TF_VAR_subscription_id: $(SubscriptionId)
+    TF_VAR_name_prefix: $(NamePrefix)
+    TF_VAR_environment: ${{ parameters.environment }}
+    TF_VAR_location: $(Location)
+    TF_VAR_vendor_base_url: $(VendorBaseUrl)
+    TF_VAR_alert_email: $(AlertEmail)
+    TF_VAR_enable_trigger: $(EnableTrigger)
+    TF_VAR_always_ready_instances: $(AlwaysReadyInstances)

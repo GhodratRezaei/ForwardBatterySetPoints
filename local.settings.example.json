@@ -3,8 +3,8 @@
   "Values": {
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     "FUNCTIONS_WORKER_RUNTIME": "node",
-    "CONNECTION-STRING-SBQ-BATBAT-SPT": "PASTE_THE_SERVICE_BUS_CONNECTION_STRING_HERE",
-    "BATTERED_BATTERIES_API_KEY": "PASTE_THE_ASSIGNED_API_KEY_HERE",
-    "BATTERED_BATTERIES_BASE_URL": "https://BatB.azure-api.net"
+    "BATTERED_BATTERIES_API_KEY": "local-test-key",
+    "BATTERED_BATTERIES_BASE_URL": "http://127.0.0.1:7072",
+    "ServiceBusConnection": "PASTE_THE_SERVICE_BUS_CONNECTION_STRING_HERE"
   }
 }

@@ -1,22 +1,17 @@
 import { app, InvocationContext } from "@azure/functions";
 import {
   FUNCTION_NAME,
-  loadAppConfig,
   SERVICE_BUS_CONNECTION_SETTING,
   SERVICE_BUS_QUEUE_NAME,
-} from "../config";
-import { BatteredBatteriesClient } from "../services/batteredBatteriesClient";
-import { processSetpointBatch } from "../services/processSetpointBatch";
+} from "../../bootstrap/config";
+import { getSetpointPublisher } from "../../bootstrap/container";
+import { processSetpointBatch } from "../../infrastructure/messaging/processSetpointBatch";
 
 export async function forwardBatterySetpoints(
   messages: unknown[],
   context: InvocationContext,
 ): Promise<void> {
-  const config = loadAppConfig();
-  const client = new BatteredBatteriesClient({
-    apiKey: config.apiKey,
-    baseUrl: config.apiBaseUrl,
-  });
+  const client = getSetpointPublisher();
 
   await processSetpointBatch(messages, client, context);
 }

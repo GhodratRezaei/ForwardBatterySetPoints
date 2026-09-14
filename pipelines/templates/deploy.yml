@@ -1,0 +1,65 @@
+parameters:
+- name: environment
+  type: string
+- name: serviceConnection
+  type: string
+- name: functionApp
+  type: string
+- name: resourceGroup
+  type: string
+
+jobs:
+- deployment: Deploy
+  environment: ${{ parameters.environment }}
+  strategy:
+    runOnce:
+      deploy:
+        steps:
+        - checkout: self
+        - download: ci
+          artifact: function
+        - task: UseNode@1
+          inputs:
+            version: '24.x'
+        - bash: node scripts/verify-ci-run.mjs
+          displayName: Require a successful protected-main CI run
+          env:
+            AZDO_TOKEN: $(System.AccessToken)
+            AZDO_COLLECTION: $(System.CollectionUri)
+            AZDO_PROJECT: $(System.TeamProjectId)
+            CI_RUN_ID: $(resources.pipeline.ci.runID)
+            CI_PIPELINE_ID: $(resources.pipeline.ci.pipelineID)
+            CI_COMMIT: $(resources.pipeline.ci.sourceCommit)
+        - bash: |
+            set -euo pipefail
+            cd "$(Pipeline.Workspace)/ci/function"
+            sha256sum --check function.zip.sha256
+            test "$(cat commit.txt)" = "$EXPECTED_COMMIT"
+          env:
+            EXPECTED_COMMIT: $(resources.pipeline.ci.sourceCommit)
+          displayName: Verify the selected CI artifact
+        - task: AzureFunctionApp@2
+          inputs:
+            azureSubscription: ${{ parameters.serviceConnection }}
+            appType: functionAppLinux
+            isFlexConsumption: true
+            appName: ${{ parameters.functionApp }}
+            package: '$(Pipeline.Workspace)/ci/function/function.zip'
+        - task: AzureCLI@2
+          displayName: Verify trigger registration (not a live command test)
+          inputs:
+            azureSubscription: ${{ parameters.serviceConnection }}
+            scriptType: bash
+            scriptLocation: inlineScript
+            inlineScript: |
+              set -euo pipefail
+              for attempt in {1..12}; do
+                count=$(az functionapp function list --name "$FUNCTION_APP" --resource-group "$RESOURCE_GROUP" --query "length([?contains(name, 'forwardBatterySetpoints')])" -o tsv)
+                if [ "$count" = "1" ]; then exit 0; fi
+                sleep 10
+              done
+              echo "Function registration was not verified" >&2
+              exit 1
+          env:
+            FUNCTION_APP: ${{ parameters.functionApp }}
+            RESOURCE_GROUP: ${{ parameters.resourceGroup }}

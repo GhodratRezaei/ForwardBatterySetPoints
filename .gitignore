@@ -4,3 +4,11 @@ coverage/
 local.settings.json
 MYREADME.md
 *.log
+artifacts/
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.backend.hcl
+crash.log

@@ -1,0 +1,47 @@
+# Sample dedicated infrastructure pipeline. No deployment runs automatically.
+trigger: none
+pr: none
+parameters:
+- name: environment
+  type: string
+  default: dev
+  values: [dev, prod]
+
+variables:
+- group: battery-${{ parameters.environment }}-infra
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+- stage: Plan
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  jobs:
+  - job: Plan
+    steps:
+    - checkout: self
+    - bash: bash scripts/install-terraform.sh
+    - template: templates/terraform-command.yml
+      parameters:
+        environment: ${{ parameters.environment }}
+        command: plan
+    - publish: '$(Build.ArtifactStagingDirectory)/infra-plan'
+      artifact: infra-plan
+
+- stage: Apply
+  dependsOn: Plan
+  jobs:
+  - deployment: Apply
+    environment: battery-${{ parameters.environment }}-infra
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self
+          - download: current
+            artifact: infra-plan
+          - bash: bash scripts/install-terraform.sh
+          - template: templates/terraform-command.yml
+            parameters:
+              environment: ${{ parameters.environment }}
+              command: apply

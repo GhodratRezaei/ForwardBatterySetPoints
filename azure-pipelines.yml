@@ -1,0 +1,58 @@
+# CI: safe tests require no Azure identity, live queue or vendor credentials.
+trigger:
+  branches:
+    include: [main]
+pr:
+  branches:
+    include: [main]
+
+pool:
+  vmImage: ubuntu-latest
+
+jobs:
+- job: Application
+  steps:
+  - task: UseNode@1
+    inputs:
+      version: '24.x'
+  - script: npm ci
+    displayName: Install locked dependencies
+  - script: npm run build && npm run typecheck:tests
+    displayName: Compile TypeScript
+  - script: npm run test:ci
+    displayName: Unit, architecture and local HTTP integration tests
+  - task: PublishTestResults@2
+    condition: succeededOrFailed()
+    inputs:
+      testResultsFormat: JUnit
+      testResultsFiles: artifacts/test-results.xml
+      failTaskOnFailedTests: true
+  - script: npm run package
+    displayName: Stage compiled code and production dependencies
+  - task: ArchiveFiles@2
+    inputs:
+      rootFolderOrFile: artifacts/function
+      includeRootFolder: false
+      archiveType: zip
+      archiveFile: '$(Build.ArtifactStagingDirectory)/function.zip'
+  - bash: |
+      set -euo pipefail
+      cd "$(Build.ArtifactStagingDirectory)"
+      sha256sum function.zip > function.zip.sha256
+      printf '%s\n' "$BUILD_SOURCEVERSION" > commit.txt
+    displayName: Record release identity and checksum
+  - publish: '$(Build.ArtifactStagingDirectory)'
+    artifact: function
+
+- job: TerraformValidation
+  steps:
+  - bash: bash scripts/install-terraform.sh
+    displayName: Install pinned Terraform CLI
+  - bash: |
+      set -euo pipefail
+      terraform fmt -check -recursive infra
+      terraform -chdir=infra/terraform init -backend=false -input=false -lockfile=readonly
+      terraform -chdir=infra/terraform validate
+      terraform -chdir=infra/bootstrap init -backend=false -input=false -lockfile=readonly
+      terraform -chdir=infra/bootstrap validate
+    displayName: Validate infrastructure without accessing Azure

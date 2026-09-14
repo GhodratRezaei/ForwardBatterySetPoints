@@ -1,14 +1,14 @@
+import { createApiRequest } from "../../../src/infrastructure/http/setpointRequestMapper";
+import { parseIncomingSetpoint } from "../../../src/infrastructure/messaging/setpointMessageMapper";
 import axios, { AxiosInstance } from "axios";
 // Vitest helpers group tests, define cases, make assertions, and create mocks.
 import { describe, expect, it, vi } from "vitest";
 import {
-  createApiRequest,
   InvalidSetpointError,
-  parseIncomingSetpoint,
   prepareSetpoint,
-} from "../src/domain/setpoint";
-import { processSetpointBatch } from "../src/services/processSetpointBatch";
-import { BatteredBatteriesClient } from "../src/services/batteredBatteriesClient";
+} from "../../../src/domain/battery/setpoint";
+import { processSetpointBatch } from "../../../src/infrastructure/messaging/processSetpointBatch";
+import { BatteredBatteriesClient } from "../../../src/infrastructure/http/batteredBatteriesClient";
 
 // Groups all tests related to setpoint validation, conversion, and processing.
 describe("setpoint conversion", () => {
@@ -250,8 +250,8 @@ function preparedSetpoint() {
 }
 
 function createClient(
-  post: ReturnType<typeof vi.fn>,
-  sleep: ReturnType<typeof vi.fn>,
+  post: (url: string, body: unknown) => Promise<unknown>,
+  sleep: (milliseconds: number) => Promise<void>,
 ): BatteredBatteriesClient {
   return new BatteredBatteriesClient({
     apiKey: "test-key",
@@ -281,5 +281,5 @@ function createContext() {
     log: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
-  } as never;
+  };
 }

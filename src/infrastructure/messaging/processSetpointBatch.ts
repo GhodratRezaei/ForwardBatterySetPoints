@@ -1,20 +1,18 @@
-import { InvocationContext } from "@azure/functions";
 import {
   decodeServiceBusMessage,
-  isAcceptedDeviceId,
   parseIncomingSetpoint,
-  prepareSetpoint,
-} from "../domain/setpoint";
-import {
-  BatteredBatteriesClient,
-  describeHttpError,
-} from "./batteredBatteriesClient";
+} from "./setpointMessageMapper";
+import { describeHttpError } from "../http/batteredBatteriesClient";
+import { ForwardBatterySetpoint } from "../../application/use-cases/forwardBatterySetpoint";
+import { SetpointPublisher } from "../../application/ports/setpointPublisher";
+import { Logger } from "../../application/ports/logger";
 
 export async function processSetpointBatch(
   rawMessages: unknown[],
-  client: BatteredBatteriesClient,
-  context: InvocationContext,
+  client: SetpointPublisher,
+  context: Logger,
 ): Promise<void> {
+  const forward = new ForwardBatterySetpoint(client);
   context.log(`Received a batch containing ${rawMessages.length} message(s).`);
 
   // The queue uses one session per device. Awaiting each call preserves the
@@ -24,7 +22,7 @@ export async function processSetpointBatch(
       const decodedMessage = decodeServiceBusMessage(rawMessage);
       const deviceId = readDeviceId(decodedMessage);
 
-      if (deviceId !== undefined && !isAcceptedDeviceId(deviceId)) {
+      if (deviceId !== undefined && !forward.acceptsDevice(deviceId)) {
         // We interpret "abandon unknown devices" as discard/ignore. Throwing here
         // would make the same permanently unknown ID retry until dead-lettered.
         context.warn(
@@ -34,9 +32,7 @@ export async function processSetpointBatch(
       }
 
       const incomingSetpoint = parseIncomingSetpoint(decodedMessage);
-      const preparedSetpoint = prepareSetpoint(incomingSetpoint);
-
-      await client.publishSetpoint(preparedSetpoint);
+      const preparedSetpoint = await forward.execute(incomingSetpoint);
 
       context.log(
         `Forwarded message ${batchIndex + 1} for device '${preparedSetpoint.deviceId}'.`,
@@ -48,7 +44,8 @@ export async function processSetpointBatch(
 
       // With automatic Service Bus settlement, throwing causes the batch to be
       // retried. Service Bus eventually dead-letters repeatedly failing messages.
-      throw error;
+      // Do not pass Axios config/headers (including the vendor key) to host logs.
+      throw new Error(describeHttpError(error));
     }
   }
 }

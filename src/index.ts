@@ -1,2 +1,2 @@
-// Importing the function module registers it with the Azure Functions v4 runtime.
-import "./functions/forwardBatterySetpoints";
+// Composition entry point: importing the adapter registers the Azure trigger.
+import "./interfaces/azure-functions/forwardBatterySetpoints";

@@ -1,0 +1,33 @@
+# Create a separate Azure DevOps pipeline from this file.
+# Choose an existing successful CI resource version when running a release/rollback.
+trigger: none
+pr: none
+resources:
+  pipelines:
+  - pipeline: ci
+    source: battery-forwarder-ci
+    trigger: none
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+- stage: Development
+  condition: and(succeeded(), eq(variables['resources.pipeline.ci.sourceBranch'], 'refs/heads/main'))
+  jobs:
+  - template: templates/deploy.yml
+    parameters:
+      environment: battery-dev
+      serviceConnection: battery-dev-deploy
+      functionApp: $(DevFunctionApp)
+      resourceGroup: $(DevResourceGroup)
+
+- stage: Production
+  dependsOn: Development
+  jobs:
+  - template: templates/deploy.yml
+    parameters:
+      environment: battery-prod
+      serviceConnection: battery-prod-deploy
+      functionApp: $(ProdFunctionApp)
+      resourceGroup: $(ProdResourceGroup)

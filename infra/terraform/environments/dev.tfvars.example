@@ -1,0 +1,9 @@
+subscription_id        = "00000000-0000-0000-0000-000000000000"
+name_prefix            = "replace123"
+environment            = "dev"
+location               = "westeurope"
+vendor_base_url        = "https://your-development-mock.example.invalid"
+alert_email            = "operations@example.invalid"
+always_ready_instances = 0
+enable_trigger         = false
+tags                   = { owner = "integration-team" }

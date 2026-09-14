@@ -1,6 +1,15 @@
 .git*
 .vscode/
 test/
+tests/
+dev/
+docs/
+infra/
+pipelines/
+scripts/
+artifacts/
+azure-pipelines.yml
+vitest.config.*
 coverage/
 local.settings.json
 local.settings.example.json

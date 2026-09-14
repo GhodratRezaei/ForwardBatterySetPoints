@@ -1,0 +1,5 @@
+resource_group_name  = "rg-company-terraform-state"
+storage_account_name = "replacecompanystate"
+container_name       = "tfstate"
+key                  = "battery-forwarder/dev.tfstate"
+use_azuread_auth     = true

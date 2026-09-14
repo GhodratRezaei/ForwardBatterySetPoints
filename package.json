@@ -15,7 +15,14 @@
     "start": "func start",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "npm run build && npm test"
+    "check": "npm run build && npm run typecheck:tests && npm test",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:architecture": "vitest run tests/architecture",
+    "test:ci": "vitest run --reporter=default --reporter=junit --outputFile.junit=artifacts/test-results.xml",
+    "package": "node scripts/package.mjs",
+    "dev:vendor": "node dev/mock-vendor.mjs",
+    "typecheck:tests": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
     "@azure/functions": "4.16.2",
