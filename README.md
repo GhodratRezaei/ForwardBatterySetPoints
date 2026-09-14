@@ -74,24 +74,19 @@ Within one invocation, `processSetpointBatch` uses `await` inside a `for...of` l
 ## Message lifecycle and failure behavior
 
 ```mermaid
-sequenceDiagram
-    autonumber
-    participant SB as Service Bus
-    participant F as Function invocation
-    participant API as Vendor API
-    participant DLQ as Dead-letter queue
-
-    SB->>F: Deliver M1, M2, M3
-    F->>API: Process M1
-    API->>F: 204 success
-    F->>API: Process M2
-    API->>F: Repeated failure
-    Note over F: Handler throws and stops before M3
-    F->>SB: Invocation fails; automatic completion does not occur
-    SB->>F: Redeliver eligible messages
-    F->>API: M1 may be sent again
-    F->>API: M2 is retried
-    SB->>DLQ: Repeatedly failing message after MaxDeliveryCount
+flowchart TD
+  A[Service Bus delivers M1 M2 M3] --> B[Function processes M1]
+  B --> C[M1 returns HTTP 204]
+  C --> D[Function processes M2]
+  D --> E[M2 fails after all HTTP attempts]
+  E --> F[Handler throws and stops before M3]
+  F --> G[Batch is not automatically completed]
+  G --> H[Eligible messages can be redelivered]
+  H --> I[M1 may be sent again]
+  H --> J[M2 is retried]
+  J --> K{MaxDeliveryCount reached?}
+  K -->|No| H
+  K -->|Yes| L[Move repeatedly failing message to dead-letter queue]
 ```
 
 The trigger uses automatic settlement:
