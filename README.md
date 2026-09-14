@@ -1,88 +1,93 @@
 # Battered Batteries Setpoint Forwarder
 
-> Assignment solution: an Azure Functions v4 service that receives battery setpoints from Azure Service Bus, validates and converts them, and forwards accepted commands to the Battered Batteries API.
+A TypeScript Azure Functions v4 application that consumes batches of battery setpoints from Azure Service Bus, filters and converts them, and forwards accepted commands to the Battered Batteries API using Axios.
+
+This is an assignment implementation, not a production-ready battery controller. The sections below separate implemented behavior, assumptions made from the supplied contract, and limitations that need further work.
 
 ## Contents
 
-- [Overview](#overview)
-- [Architecture](#architecture)
-- [Development](#development)
+- [Architecture and processing](#architecture-and-processing)
+- [Processing sequence](#processing-sequence)
+- [Input and API mapping](#input-and-api-mapping)
+- [Filtering and validation](#filtering-and-validation)
+- [Service Bus sessions and ordering](#service-bus-sessions-and-ordering)
+- [Message lifecycle and failure behavior](#message-lifecycle-and-failure-behavior)
+- [HTTP reliability policy](#http-reliability-policy)
+- [Assumptions and rationale](#assumptions-and-rationale)
+- [Known trade-offs and limitations](#known-trade-offs-and-limitations)
+- [Project structure](#project-structure)
+- [Local development](#local-development)
 - [Testing](#testing)
-- [Deployment](#deployment)
-- [Operations](#operations)
-- [Assumptions and limitations](#assumptions-and-limitations)
-- [Repository layout](#repository-layout)
+- [Deployment considerations](#deployment-considerations)
+- [Appendix](#appendix)
 
-## Overview
+## Architecture and processing
 
-This is a small event-driven integration service. It does not own battery inventory, scheduling, billing, or physical battery execution. Its responsibility is to translate a producer command into the vendor's command format and deliver it reliably.
-
-The service uses:
-
-- **Azure Service Bus** for durable, session-aware message delivery.
-- **Azure Functions v4** for serverless execution.
-- **TypeScript** for maintainable application code and compile-time checks.
-- **Axios** for authenticated vendor HTTP calls.
-- **Terraform** for repeatable Azure infrastructure.
-- **Azure DevOps pipelines** for validation, infrastructure changes, and artifact release.
-
-## Architecture
+The trigger registers the function and loads configuration. The batch processor controls filtering and sequencing; domain functions validate and transform the data; the HTTP client handles authentication, requests, and retries.
 
 ```mermaid
-flowchart LR
-    Producer[Command producer] --> Queue[(Service Bus session queue)]
-    Queue --> Trigger[Azure Functions trigger]
-    Trigger --> Messaging[Messaging adapter]
-    Messaging --> UseCase[Forward setpoint use case]
-    UseCase --> Domain[Domain rules]
-    UseCase --> Publisher[Publisher port]
-    Publisher --> Vendor[Vendor API]
-    Queue -. repeated failure .-> DLQ[(Dead-letter queue)]
+flowchart TD
+    Producer["Producer"] --> Queue["Service Bus queue"]
+    Queue --> Trigger["Batch trigger"]
+    subgraph Application["Application code"]
+        Trigger --> Batch["Batch processor"]
+        Batch --> Domain["Domain rules"]
+        Domain --> Batch
+        Batch --> Client["HTTP client"]
+    end
+    Client --> API["Vendor API"]
+    Queue -->|Limit exceeded| DLQ["Dead-letter queue"]
 ```
 
-The source is organized using a lightweight DDD and ports-and-adapters structure:
+For each invocation:
 
-```text
-interfaces -> infrastructure/bootstrap -> application -> domain
-```
+1. `forwardBatterySetpoints` receives an array of message bodies and creates the API client.
+2. `processSetpointBatch` decodes each body and checks its device ID.
+3. Unsupported string device IDs are logged and skipped.
+4. Accepted messages are validated and converted into a prepared setpoint.
+5. The client creates a fresh API time window and posts the command.
+6. The processor continues only after success. A final failure throws and stops the loop; later messages in that invocation are not attempted.
+7. The Functions extension settles the delivered messages after the invocation.
 
-- **Domain** contains accepted-device rules, duration validation, power conversion, and immutable prepared values.
-- **Application** coordinates one command through the `SetpointPublisher` port.
-- **Infrastructure** maps Service Bus messages, creates vendor requests, and handles HTTP retries.
-- **Interfaces** register the Azure Functions trigger.
-- **Bootstrap** loads configuration and creates shared dependencies.
+`cardinality: "many"` enables batch input. The extension determines the actual batch size within its configuration; this project's `host.json` does not explicitly tune Service Bus batch settings. The application does not collect its own batches.
 
-The domain and application layers do not depend on Azure Functions, Axios, or environment variables.
+## Processing sequence
 
-### Message flow
+This diagram shows a successful invocation. The producer has already enqueued the messages with the appropriate session IDs. The batch processor includes decoding, filtering, and calls to the domain functions.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Producer
     participant SB as Service Bus
-    participant Host as Functions host
-    participant App as Application
+    participant AF as Runtime
+    participant BP as Processor
+    participant HC as HTTP client
     participant API as Vendor API
-
-    Producer->>SB: Enqueue command with SessionId = device_id
-    SB->>Host: Deliver an available batch
-    Host->>App: Invoke handler
-    loop Each message in received order
-        App->>App: Decode and filter
-        App->>App: Validate and prepare
-        App->>API: POST authenticated setpoint
-        API->>App: HTTP 204
+    SB->>AF: Deliver batch
+    AF->>BP: Invoke handler
+    loop Each message
+        BP->>BP: Decode and filter
+        alt Unknown device
+            BP->>BP: Log and skip
+        else Valid command
+            BP->>BP: Prepare command
+            BP->>HC: Publish
+            HC->>HC: Set time window
+            HC->>API: POST setpoint
+            API-->>HC: HTTP 204
+            HC-->>BP: Return success
+        end
     end
-    App->>Host: Resolve invocation
-    Host->>SB: Complete delivered messages
+    BP-->>AF: Handler resolves
+    AF->>SB: Complete batch
+    Note over SB: Remove messages
 ```
 
-The trigger uses `cardinality: "many"`; Azure chooses the actual batch composition. The host configuration limits a batch to five messages. The processor awaits each message before starting the next one, so processing is sequential within an invocation.
+Validation errors and final HTTP failures exit this success path: the handler rejects, and the remaining messages are not processed. The diagrams below describe those failure paths.
 
-### Input and conversion
+## Input and API mapping
 
-Example input:
+Example incoming body:
 
 ```json
 {
@@ -96,184 +101,265 @@ Example input:
 }
 ```
 
-| Input | Vendor request | Rule |
+| Input | Vendor destination | Implementation |
 | --- | --- | --- |
-| `device_id` | `/{device}/setpoint` | Must be in the accepted-device list |
-| `setpoint.value` in kW | `data.value` in W | Multiply by `-1000` and round |
-| `eventTime` and `endTime` | Command duration | Between one minute and one hour |
-| Processing time | `data.startTime` | Current epoch time plus two seconds |
-| Duration | `data.endTime` | New start time plus the original duration |
+| `device_id` | `/{device}/setpoint` | Accepted ID, URL-encoded |
+| `setpoint.value` | `data.value` | `Math.round(value * -1000)` |
+| `eventTime`, `setpoint.endTime` | Duration | `Math.ceil((endTimeMs - eventTimeMs) / 1000)` |
+| Clock immediately before an attempt | `data.startTime` | `Math.floor(nowMs / 1000) + 2` |
+| Start and duration | `data.endTime` | `startTime + durationSeconds` |
 
-The sign changes because the producer uses the grid perspective and the vendor uses the battery perspective. For example, `+1 kW` becomes `-1000 W`, while `-2.5 kW` becomes `+2500 W`.
+The input uses the grid perspective, whereas the API uses the battery perspective. Therefore, `+1 kW` becomes `-1000 W` for discharging, and `-2.5 kW` becomes `+2500 W` for charging.
 
-The API request window is rebuilt immediately before each HTTP attempt so that a retry still receives a future start time.
+The example has a 60-second duration. With the clock fixed at `2025-01-01T12:00:00.000Z`, it produces:
 
-## Development
+```json
+{
+  "data": {
+    "startTime": 1735732802,
+    "endTime": 1735732862,
+    "value": -1000
+  }
+}
+```
 
-### Prerequisites
+The time window is rebuilt before every HTTP attempt, not captured once at queue arrival. This avoids reusing timestamps made stale by an earlier retry delay, but does not guarantee that the start remains in the future when the vendor receives it.
 
-- Node.js 24 is preferred; Node.js 22 is also supported.
-- npm.
-- Azure Functions Core Tools v4 for running the local host.
-- A development Service Bus queue if testing the live trigger locally.
-- Azurite only when local Functions storage is required.
+## Filtering and validation
+
+The accepted-device list is hardcoded:
+
+```json
+["BB00001", "BB00005", "BB00006", "BB00007", "BB00293"]
+```
+
+Filtering runs before full payload validation. A string device ID outside this list is skipped without an HTTP call, even if other fields are invalid. In the current processor, this also includes empty or whitespace-only string IDs. Missing or non-string IDs proceed to validation and fail.
+
+For messages that reach validation, the code checks:
+
+- the decoded body and `setpoint` are objects;
+- `device_id` is a non-empty string;
+- power is a finite number and the unit is exactly `kW`;
+- timestamps are strings parseable by `Date.parse`;
+- the original duration is between 60 and 3,600 seconds, inclusive.
+
+Malformed JSON and validation failures throw. Date parsing is not strict ISO-format validation, and there is no device-specific power-limit check.
+
+## Service Bus sessions and ordering
+
+The assumed infrastructure contract is:
+
+1. Queue `sbq-batbat-spt` has sessions enabled.
+2. The producer sets Service Bus metadata `SessionId = device_id`.
+3. Commands for each device are enqueued in their intended application order.
+
+The trigger declares:
+
+```typescript
+isSessionsEnabled: true,
+cardinality: "many",
+autoCompleteMessages: true,
+```
+
+Service Bus gives one receiver exclusive ownership of a session while its lock is held. Sequential application processing preserves received order within an invocation. Different device sessions may run concurrently. See [Microsoft's session documentation](https://learn.microsoft.com/en-us/azure/service-bus-messaging/message-sessions).
+
+The trigger flag does not provision the queue or assign session IDs. The application also does not verify that session metadata matches the body. It does not sort messages by `eventTime`.
+
+Sessions order message handling; they do not guarantee the order in which an unreliable external API applies requests. For example, a timed-out HTTP request might still finish at the vendor after another attempt.
+
+## Message lifecycle and failure behavior
+
+With automatic settlement, a successful invocation causes the delivered messages to be completed. On failure, the runtime abandons uncompleted messages for redelivery; lock expiry or settlement failure can also cause redelivery. The application does not manually settle individual messages. See [Service Bus trigger behavior](https://learn.microsoft.com/en-us/azure/azure-functions/functions-bindings-service-bus-trigger#peeklock-behavior).
+
+Consider a batch containing `M1`, `M2`, and `M3`:
+
+```mermaid
+flowchart TD
+    Batch["Receive batch"] --> M1["M1 succeeds"]
+    M1 --> M2["M2 exhausts retries"]
+    M2 --> Stop["Throw and stop"]
+    Stop --> Abandon["Abandon messages"]
+    Abandon --> Limit{"Limit exceeded?"}
+    Limit -->|No| Ready["Await redelivery"]
+    Ready --> Next["New invocation"]
+    Limit -->|Yes| DLQ["Dead-letter queue"]
+```
+
+In this example, the batch contains M1, M2, and M3. M1 receives HTTP 204; M2 fails after all HTTP attempts; M3 is not attempted because the handler stops. On redelivery, M1 may be posted again, and M2 and M3 may also return.
+
+The broker applies its delivery-limit policy per message. The diagram is an example of one failed invocation, not a guarantee that all messages return together or have identical delivery counts.
+
+The HTTP side effect cannot be rolled back when the queue invocation fails. Batch boundaries on redelivery need not match the previous invocation.
+
+This is an **at-least-once processing design**, not an exactly-once guarantee. Repeated delivery failures can move messages to the dead-letter queue under the broker's `MaxDeliveryCount` policy. Successfully forwarded or unattempted messages can also accumulate delivery counts when abandoned together with a failed batch; the risk is not limited to the message that originally caused the failure.
+
+Completing a message removes it from the active queue. It does not send a processing-complete notification to the producer.
+
+## HTTP reliability policy
+
+The client posts to `/{device}/setpoint` using `Ocp-Apim-Subscription-Key` authentication.
+
+```mermaid
+flowchart TD
+    Start["Prepare and POST"] --> Result{"HTTP 204?"}
+    Result -->|Yes| Success["Return success"]
+    Result -->|No| Retryable{"Retryable error?"}
+    Retryable -->|Yes| Attempts{"Attempts remain?"}
+    Retryable -->|No| Fail["Throw error"]
+    Attempts -->|No| Fail
+    Attempts -->|Yes| Header{"Use server delay?"}
+    Header -->|Yes| Server["Cap delay at 5 s"]
+    Header -->|No| Backoff["Backoff and jitter"]
+    Server --> Wait["Await delay"]
+    Backoff --> Wait
+    Wait --> Start
+```
+
+This is the current client policy, including the capped server delay described below. Throwing ends this HTTP retry loop; any later broker redelivery starts a separate invocation.
+
+Diagram labels: **Prepare and POST** rebuilds the time window before each attempt. **Retryable error** means a timeout, network failure, HTTP 429, or HTTP 5xx. **Use server delay** means HTTP 429 with a valid `Retry-After` header; that delay is capped at five seconds. Otherwise the client uses exponential backoff and jitter. **Throw error** fails the invocation.
+
+| Setting or outcome | Behavior |
+| --- | --- |
+| Timeout | 8 seconds per HTTP attempt |
+| Attempt limit | Three total attempts per `publishSetpoint` call |
+| HTTP 204 | Success |
+| Network failure, timeout, HTTP 429 or 5xx | Retry while attempts remain |
+| HTTP 400, 401, 404 | Throw without an internal HTTP retry |
+| Other unexpected final response | Throw |
+| Default retry delay | 500 ms, then 1,000 ms, plus 0–249 ms jitter |
+| Valid `Retry-After` on 429 | Parse seconds or an HTTP date; cap the delay at 5 seconds |
+| Missing or invalid `Retry-After` | Use exponential delay and jitter |
+
+The five-second cap is an implementation limitation: `Retry-After: 60` causes a five-second wait, so the full server-requested cooldown is **not respected**. A production policy should honor that cooldown or defer work appropriately.
+
+HTTP retries and broker redelivery are separate. A permanent HTTP error is not retried inside the client, but it still fails the invocation and can be attempted again after Service Bus redelivery. The three-attempt limit is not a lifetime limit per message.
+
+## Assumptions and rationale
+
+These are explicit interpretations of gaps or ambiguities in the assignment, not additional guarantees supplied by the API.
+
+| Topic | Chosen assumption or decision | Rationale and consequence |
+| --- | --- | --- |
+| Duration | `endTime - eventTime` represents the intended command duration | Preserves the requested run length when delivery is delayed. The original absolute deadline is not retained. |
+| Immediate activation | Send as soon as sequential processing permits, with a small future start offset | Reconciles the assignment's arrival-time wording with the Swagger's future-start requirement. Literal activation at arrival is not achieved. |
+| Clock margin | Use `floor(now / 1000) + 2` | Provides just over one to two seconds of lead time. Assumes sufficiently aligned clocks and short request transit; this must be validated with the vendor. |
+| Unknown devices | Interpret “abandon” as log and skip, not the formal broker operation | Avoids repeatedly retrying a permanently unsupported ID. If formal abandon is intended, this implementation does not meet that interpretation and needs a settlement change. |
+| Ordering | Sessions enabled, one device per session, producer order is authoritative | Avoids concurrent consumers racing for the same device stream under normal lock ownership. Requires external setup. |
+| Rounding | Round to whole watts; round duration upward to whole seconds | Matches the API's integer fields. May change power by up to half a watt and extend duration by less than one second. |
+| Replacement | Each newly accepted setpoint replaces the previous one | Taken from the assignment's vendor explanation. Replacement avoids accumulating independent commands, but does not make replay harmless. |
+| Cancellation | Do not generate clearing commands automatically | No cancellation action exists in the input schema; ordinary commands already replace older commands. |
+
+### One-second clearing command
+
+The vendor demonstration describes replacing a long command with a short one that expires after one second. A possible neutral request would use `value: 0` and `endTime = startTime + 1`.
+
+Using zero is an assumption: it requests no charging or discharging during that second. After expiry, no active setpoint remains according to the demonstration. The contract does **not** specify whether the battery then stays neutral or resumes autonomous/default behavior.
+
+This cancellation request is not implemented. Automatically sending it after a normal command would cancel that command. A future cancellation feature should have an explicit input action and bypass the normal one-minute minimum through a separate conversion path.
+
+## Known trade-offs and limitations
+
+- **Replay can change battery behavior.** Repeated commands get fresh timestamps, potentially extending their effect. Replaying earlier commands from a failed batch can temporarily replace a later command. Replacement semantics alone do not establish safe replay or a guaranteed final state.
+- **Timeouts leave an uncertain outcome.** The vendor may have applied a request even when the client did not receive its response. Sequential awaits do not eliminate outstanding vendor-side processing after a timeout.
+- **No exactly-once mechanism.** A local “processed messages” store could reduce duplicates but cannot, by itself, atomically coordinate an HTTP side effect with a database write. Stronger guarantees require a vendor-supported protocol such as idempotency plus an agreed ordering strategy.
+- **No stale-command policy.** Delayed and redelivered commands retain their full duration. There is no age cutoff, original-deadline enforcement, or latest-command deduplication.
+- **Batch failure affects healthy messages.** A poison message stops the remaining invocation and can cause other messages to replay or eventually dead-letter. Per-message settlement would reduce this coupling but adds complexity.
+- **No global rate limiter or circuit breaker.** Sequential processing limits requests only within an invocation. Other sessions and instances can still load the API; broker redelivery does not provide a vendor-wide cooldown.
+- **Batch and lock settings need tuning.** The repository uses extension defaults. Long batches combined with sequential timeouts and retries can exceed the available processing/lock budget.
+- **Validation is intentionally limited.** There is no strict ISO timestamp enforcement, safe-integer check after conversion, or physical power-range validation. These need explicit contract limits and additional tests.
+- **Live integration remains unverified.** Unit tests do not establish actual session delivery, settlement, vendor timing, or physical battery behavior.
+
+## Project structure
+
+| Path | Responsibility |
+| --- | --- |
+| `src/index.ts` | Imports the function registration |
+| `src/config.ts` | Queue constants and environment configuration |
+| `src/domain/setpoint.ts` | Message types, validation, and conversion |
+| `src/functions/forwardBatterySetpoints.ts` | Trigger registration and client construction |
+| `src/services/processSetpointBatch.ts` | Filtering and sequential orchestration |
+| `src/services/batteredBatteriesClient.ts` | Axios requests, timeout, and retries |
+| `test/setpointConversion.test.ts` | Unit tests |
+| `host.json` | Functions host and extension bundle settings |
+| `local.settings.example.json` | Configuration template without credentials |
+| `package.json`, `package-lock.json` | Scripts and dependency versions |
+| `tsconfig.json` | Compiler settings; output goes to `dist/` |
+
+The v4 programming model registers the trigger with `app.serviceBusQueue(...)`, rather than a hand-written `function.json`. See the [Node.js developer guide](https://learn.microsoft.com/en-us/azure/azure-functions/functions-reference-node).
+
+## Local development
 
 ### Install and verify
+
+The package declares Node.js 22–24. Use a Node version supported by the target Azure hosting environment as well.
 
 ```bash
 npm ci
 npm run check
 ```
 
-The check command builds the application, type-checks the test project, and runs the complete safe test suite.
-
-### Local vendor fixture
-
-The repository includes a loopback vendor fixture. Start it in one terminal:
-
-```bash
-npm run dev:vendor
-```
-
-It listens on `http://127.0.0.1:7072`, checks the local API key, accepts the expected setpoint route, and returns HTTP 204. It never contacts the real vendor.
-
-### Local Functions host
-
-1. Copy `local.settings.example.json` to `local.settings.json`.
-2. Configure development Service Bus access and the vendor API key.
-3. Point `BATTERED_BATTERIES_BASE_URL` at the local fixture when appropriate.
-4. Use a session-enabled development queue with `SessionId = device_id`.
-5. Start the fixture and Functions host in separate terminals.
-6. Send only approved development messages.
-
-```bash
-npm start
-```
-
-Do not point a local host at a production queue or vendor endpoint without explicit authorization.
-
-### Useful commands
+`npm ci` installs the locked dependency versions. `npm install` can also be used during development. The check command compiles application TypeScript and runs Vitest; `tsconfig.json` excludes the test directory, so this command does not separately type-check test files.
 
 | Command | Purpose |
 | --- | --- |
-| `npm run build` | Clean and compile application code |
-| `npm run watch` | Recompile when source files change |
-| `npm test` | Run all tests once |
-| `npm run test:watch` | Run tests continuously |
-| `npm run check` | Build, type-check tests, and run tests |
-| `npm run package` | Create the deployable application package |
-| `npm start` | Build and start the local Functions host |
+| `npm run build` | Clean `dist/` and compile application code |
+| `npm run watch` | Recompile on source changes |
+| `npm test` | Run Vitest once |
+| `npm run test:watch` | Run Vitest in watch mode |
+| `npm run check` | Build and run tests |
+| `npm start` | Build and start the Functions host |
 
-`local.settings.json`, credentials, Terraform state, and generated packages must not be committed.
+### Local configuration
+
+```powershell
+Copy-Item local.settings.example.json local.settings.json
+```
+
+Configure:
+
+- `CONNECTION-STRING-SBQ-BATBAT-SPT`: queue connection string;
+- `BATTERED_BATTERIES_API_KEY`: vendor API key;
+- `BATTERED_BATTERIES_BASE_URL`: optional, defaults to `https://BatB.azure-api.net`;
+- `AzureWebJobsStorage`: the example uses `UseDevelopmentStorage=true`, which requires a running Azurite emulator when storage is accessed, or a suitable real storage connection.
+
+Azure Functions Core Tools v4 is needed for local host execution and is included as a development dependency. The trigger's `connection` field refers to a setting name, not a secret value. Never commit `local.settings.json` or real API credentials.
+
+There is no vendor test environment. Do not start the integration with real credentials without authorization to consume the queue and call the vendor API.
 
 ## Testing
 
-### Test layers
+The expanded test file defines **17 test cases**, including parameterized cases. It covers selected examples of:
 
-| Layer | Location | Purpose |
-| --- | --- | --- |
-| Unit | `tests/unit/domain` | Domain rules and conversion |
-| Unit | `tests/unit/application` | Use-case behavior with fake ports |
-| Unit | `tests/unit/infrastructure` | Mapping, filtering, retries, and ordering |
-| Integration | `tests/integration` | Vendor HTTP adapter against local fixtures |
-| Architecture | `tests/architecture` | Enforce dependency direction |
-| Release gate | `tests/integration/releaseGate.test.ts` | Verify release prerequisites and trigger registration |
+- sign/unit conversion and shifted API timestamps;
+- duration rejection, malformed JSON, and unsupported units;
+- unknown-device filtering;
+- mocked 429, timeout, and 500 retries;
+- no internal retries for 400, 401, and 404;
+- rejection of an unexpected HTTP 200;
+- sequential batch calls and propagation of a client failure;
+- forwarding an accepted single-message batch through `processSetpointBatch`.
 
-### Safe checks
+HTTP clients, delays, and logging contexts are mocked where needed; these tests do not contact Azure or the vendor API. The last test calls the batch processor, not the registered Azure trigger, so it does not verify the trigger handler contract or session configuration. The ordering test verifies loop sequencing, not live Service Bus session ordering.
 
-```bash
-npm run check
-npm run test:unit
-npm run test:integration
-npm run test:architecture
-npm run typecheck:tests
-```
+**Assignment compliance:** the supplied task requests one implemented test and descriptive TODO comments for all others. The expanded 17-case suite exceeds that requirement. Unless the examiner approves the expansion, retain one implemented test in the submission and express the remaining scenarios as TODO comments; update this section to match that submitted version.
 
-The tests use mocks or local fixtures and do not contact Azure Service Bus or the real vendor API. `npm run test:ci` additionally produces a JUnit report for pipeline publishing.
+## Deployment considerations
 
-### Cloud acceptance
+Before running against real resources:
 
-Live Azure acceptance is a separate activity using approved development resources. It should verify valid forwarding, per-device ordering, independent sessions, unknown-device handling, dead-letter behavior, retry recovery, worker restart recovery, and missing-role diagnostics.
+1. Provision the Function App, storage, session-enabled queue, and required settings separately; this repository contains no infrastructure deployment code.
+2. Confirm the producer's session ID and command-ordering contract.
+3. Select a conservative batch size and verify processing time against queue/session locks and Function timeout settings. Do not assume single-message lock-renewal settings apply unchanged to batches.
+4. Agree unknown-device handling, stale-command behavior, and cancellation semantics with the examiner or service owner.
+5. Fix the truncated `Retry-After` handling and agree vendor-wide concurrency/cooldown limits before relying on this for production.
+6. Add dead-letter monitoring and controlled replay procedures. Replaying old commands must account for their age and possible HTTP side effects.
+7. Verify the selected runtime/extension combination with an authorized session-enabled integration test and an isolated HTTP stub before vendor testing.
 
-The repository provides the local fixture and test boundaries; it does not automatically send commands to a real battery.
+The [Service Bus binding configuration reference](https://learn.microsoft.com/en-us/azure/azure-functions/functions-bindings-service-bus#hostjson-settings) describes the host settings to review during deployment.
 
-## Deployment
+## Appendix
 
-Deployment is intentionally kept outside the main assignment explanation. The repository includes Terraform and Azure DevOps pipeline definitions for a separate, reviewable deployment path.
+Detailed deployment and CI/CD material is kept separately from the main assignment documentation:
 
-See the [Deployment and CI/CD appendix](appendix/deployment-and-cicd.md) for infrastructure ownership, Terraform workflow, pipeline flow, identity, secrets, promotion, rollback, and environment caveats.
-
-## Operations
-
-### Delivery and failure behavior
-
-The service uses automatic settlement and at-least-once delivery:
-
-- Successful invocation: delivered messages are completed.
-- Failed invocation: messages can be delivered again.
-- Repeated failures: Service Bus moves messages to the dead-letter queue according to `MaxDeliveryCount`.
-
-A failed message stops the current loop. Messages already sent successfully may be replayed, and later messages in the batch are not attempted during that invocation.
-
-```mermaid
-flowchart TD
-    A[Receive batch] --> B[M1 succeeds]
-    B --> C[M2 fails after HTTP retries]
-    C --> D[Handler throws; M3 is not attempted]
-    D --> E[Batch is not completed]
-    E --> F[Eligible messages are redelivered]
-    F --> G{Delivery limit reached?}
-    G -->|No| A
-    G -->|Yes| H[Move repeatedly failing message to dead-letter queue]
-```
-
-### Monitoring
-
-Monitor failed invocations, dead-letter count, queue age, delivery count, vendor latency, throttling, session locks, and worker restarts. Logs should identify the device and invocation without exposing secrets.
-
-### Dead-letter handling
-
-Do not bulk replay dead letters. Review the reason, age, device, delivery history, and current validity first. Replaying an old message creates a new time window and can change its position relative to newer commands. Record the original message ID, reason, operator, time, and replacement message ID.
-
-### HTTP reliability
-
-The vendor client uses an 8-second timeout per attempt and at most three attempts. It retries network failures, timeouts, HTTP 429, and HTTP 5xx responses. HTTP 400, 401, and 404 are not retried inside the client. Only HTTP 204 is accepted as success. Retry delays use exponential backoff with jitter, while a valid `Retry-After` value for HTTP 429 is capped at five seconds.
-
-## Assumptions and limitations
-
-These decisions come from gaps or ambiguities in the supplied assignment contract and should be confirmed before production use:
-
-| Area | Decision | Consequence |
-| --- | --- | --- |
-| Queue ordering | Session-enabled queue with `SessionId = device_id` | Ordering depends on the producer and broker setup |
-| Unknown devices | Log and skip unsupported string IDs | They do not enter the vendor flow or retry loop |
-| Duration | Use `endTime - eventTime` | Delivery delay does not shorten the requested duration |
-| Activation | Add a small future clock margin | Literal activation at queue arrival is not guaranteed |
-| Replacement | A new setpoint replaces the current command | Replay is tolerable but not strictly idempotent |
-| Cancellation | No explicit cancellation action exists | No one-second clearing command is generated automatically |
-| Infrastructure | Terraform is a starting Azure design | Quotas, networking, approvals, and availability need review |
-
-Known limitations include uncertain outcomes after HTTP timeouts, no vendor idempotency key, no global rate limiter, fixed device allowlist, no stale-command policy, and possible replay of healthy messages in a failed batch.
-
-## Repository layout
-
-| Path | Responsibility |
-| --- | --- |
-| `src/domain` | Battery rules and immutable values |
-| `src/application` | Use cases and ports |
-| `src/infrastructure` | Messaging and HTTP adapters |
-| `src/interfaces` | Azure Functions trigger registration |
-| `src/bootstrap` | Configuration and dependency wiring |
-| `tests` | Unit, integration, architecture, and release-gate tests |
-| `appendix/deployment/infra` | Terraform infrastructure |
-| `appendix/deployment/pipelines` | Azure DevOps pipeline definitions |
-| `appendix/deployment/scripts` | Deployment and release helpers |
-| `README.md` | Single project and operational document |
-
-## References
-
-- [Azure Functions Service Bus trigger](https://learn.microsoft.com/en-us/azure/azure-functions/functions-bindings-service-bus-trigger)
-- [Azure Service Bus message sessions](https://learn.microsoft.com/en-us/azure/service-bus-messaging/message-sessions)
-- [Azure Functions Node.js developer guide](https://learn.microsoft.com/en-us/azure/azure-functions/functions-reference-node)
-- [Azure Functions Flex Consumption](https://learn.microsoft.com/en-us/azure/azure-functions/flex-consumption-plan)
-- [Azure Functions deployment technologies](https://learn.microsoft.com/en-us/azure/azure-functions/functions-deployment-technologies)
+- [Deployment and CI/CD](appendix/deployment-and-cicd.md)
